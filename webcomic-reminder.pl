@@ -36,7 +36,7 @@ get '/' => sub ($c) {
         my $last_read    = last_read_for($comic->{name});
 
         push $dates{$c->truncate_to_date( $latest_entry->{pubdate} )}->{comics}->@*,
-            { name => $comic->{name}, last_read => $last_read->{pubdate} };
+            { name => $comic->{name}, last_read => $last_read ? $c->local_date($last_read->{pubdate}) : 'never' };
     }
 
     $c->stash( dates => \%dates );
@@ -45,6 +45,9 @@ get '/' => sub ($c) {
 
 get '/goto' => sub ($c) {
     my $last_read = last_read_for($c->param('comic'));
+    unless ($last_read) {
+        $last_read = first_entry_for($c->param('comic'));
+    }
 
     # Set everything currently in the DB as opened.
     $sqlite->db->query(<<~'SQL', $c->param('comic'));
@@ -77,17 +80,16 @@ sub last_read_for($comic_name) {
         SQL
     my $last_read = $q->hash;
 
-    unless ($last_read) {
-        # If no latest entry, none has been opened, so get the first one by date
-        my $q = $sqlite->db->query(<<~'SQL', $comic_name);
-            SELECT * FROM url
-            WHERE comic_name = ?
-            ORDER BY datetime(pubdate) ASC LIMIT 1
-            SQL
-        $last_read = $q->hash;
-    }
-
     return $last_read;
+}
+
+sub first_entry_for($comic_name) {
+    my $q = $sqlite->db->query(<<~'SQL', $comic_name);
+        SELECT * FROM url
+        WHERE comic_name = ?
+        ORDER BY datetime(pubdate) ASC LIMIT 1
+        SQL
+    return $q->hash;
 }
 
 app->start;
@@ -100,7 +102,7 @@ __DATA__
     <h2><%= $c->local_date( $d ) %></h2>
     <% for my $comic ($dates->{$d}->{comics}->@*) { %>
         <p><a href="/goto?comic=<%= $comic->{name} %>" target="_blank">
-            <%= $comic->{name} %></a> Last read: <%= $c->local_date( $comic->{last_read} ) %>
+            <%= $comic->{name} %></a> Last read: <%= $comic->{last_read} %>
         </p>
     <% } %>
 <% } %>
